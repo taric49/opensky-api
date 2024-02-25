@@ -1,107 +1,96 @@
-'''
-FLIGHT TRACKING WITH PYTHON AND OPEN AIR TRAFFIC DATA
-by ideagora geomatics | www.geodose.com | @ideageo
-'''
-#IMPORT LIBRARY
-import requests
-import json
-import pandas as pd
-from bokeh.plotting import figure
-from bokeh.models import HoverTool,LabelSet,ColumnDataSource
-from bokeh.tile_providers import get_provider, STAMEN_TERRAIN
-import numpy as np
-from bokeh.server.server import Server
-from bokeh.application import Application
-from bokeh.application.handlers.function import FunctionHandler
 
-#FUNCTION TO CONVERT GCS WGS84 TO WEB MERCATOR
-#DATAFRAME
-def wgs84_to_web_mercator(df, lon="long", lat="lat"):
-    k = 6378137
-    df["x"] = df[lon] * (k * np.pi/180.0)
-    df["y"] = np.log(np.tan((90 + df[lat]) * np.pi/360.0)) * k
-    return df
+from opensky_api import OpenSkyApi
+from datetime import datetime
 
-#POINT
-def wgs84_web_mercator_point(lon,lat):
-    k = 6378137
-    x= lon * (k * np.pi/180.0)
-    y= np.log(np.tan((90 + lat) * np.pi/360.0)) * k
-    return x,y
+api = OpenSkyApi()
+# bbox = (min latitude, max latitude, min longitude, max longitude)
 
-#AREA EXTENT COORDINATE WGS84
-lon_min,lat_min=-125.974,30.038
-lon_max,lat_max=-68.748,52.214
+#Data of the aircraft that we need
+class Data_for_aircraft:
+    def __init__(self, icao24 = "", time_position = 0, longitude = 0, latitude = 0, velocity = 0, geo_altitude = 0):
+        error_tp = False
+        error_longitude = False
+        error_latitude = False
+        error_velocity = False
+        error_geo_altitude = False
 
-#COORDINATE CONVERSION
-xy_min=wgs84_web_mercator_point(lon_min,lat_min)
-xy_max=wgs84_web_mercator_point(lon_max,lat_max)
-
-#COORDINATE RANGE IN WEB MERCATOR
-x_range,y_range=([xy_min[0],xy_max[0]], [xy_min[1],xy_max[1]])
-
-#REST API QUERY
-user_name=''
-password=''
-url_data='https://'+user_name+':'+password+'@opensky-network.org/api/states/all?'+'lamin='+str(lat_min)+'&lomin='+str(lon_min)+'&lamax='+str(lat_max)+'&lomax='+str(lon_max)
-
-    
-#FLIGHT TRACKING FUNCTION
-def flight_tracking(doc):
-    # init bokeh column data source
-    flight_source = ColumnDataSource({
-        'icao24':[],'callsign':[],'origin_country':[],
-        'time_position':[],'last_contact':[],'long':[],'lat':[],
-        'baro_altitude':[],'on_ground':[],'velocity':[],'true_track':[],
-        'vertical_rate':[],'sensors':[],'geo_altitude':[],'squawk':[],'spi':[],'position_source':[],'x':[],'y':[],
-        'rot_angle':[],'url':[]
-    })
-    
-    # UPDATING FLIGHT DATA
-    def update():
-        response=requests.get(url_data).json()
+        self.icao24 = str(icao24)
         
-        #CONVERT TO PANDAS DATAFRAME
-        col_name=['icao24','callsign','origin_country','time_position','last_contact','long','lat','baro_altitude','on_ground','velocity',       
-'true_track','vertical_rate','sensors','geo_altitude','squawk','spi','position_source']
-       
-        flight_df=pd.DataFrame(response['states']) 
-
-        flight_df=flight_df.loc[:,0:16] 
-
-        flight_df.columns=col_name
-        wgs84_to_web_mercator(flight_df)
-        flight_df=flight_df.fillna('No Data')
-        flight_df['rot_angle']=flight_df['true_track']*-1
-        icon_url='https:...' #icon url
-        flight_df['url']=icon_url
+        if(time_position != None and time_position < 0):
+            error_tp = True
+            print("time_position error")
+        if(longitude != None and longitude<-180 and 180<longitude):
+            error_longitude = True
+            print("longitude error")
+        if(latitude != None and latitude<-90 and 90<latitude):
+            error_latitude = True
+            print("latitude error")
+        if(velocity != None and velocity<0):
+            error_velocity = True
+            print("velocity error")
+        if(geo_altitude != None and geo_altitude<0 and 30.000<geo_altitude):
+            error_geo_altitude = True
+            print("geo_altitude error")
+        if(error_tp or error_longitude or error_latitude or error_velocity or error_geo_altitude):
+            raise ValueError()
         
-        # CONVERT TO BOKEH DATASOURCE AND STREAMING
-        n_roll=len(flight_df.index)
-        flight_source.stream(flight_df.to_dict(orient='list'),n_roll)
         
-    #CALLBACK UPATE IN AN INTERVAL
-    doc.add_periodic_callback(update, 5000) #5000 ms/10000 ms for registered user . 
-     
-    #PLOT AIRCRAFT POSITION
-    p=figure(x_range=x_range,y_range=y_range,x_axis_type='mercator',y_axis_type='mercator',sizing_mode='scale_width',plot_height=300)
-    tile_prov=get_provider(STAMEN_TERRAIN)
-    p.add_tile(tile_prov,level='image')
-    p.image_url(url='url', x='x', y='y',source=flight_source,anchor='center',angle_units='deg',angle='rot_angle',h_units='screen',w_units='screen',w=40,h=40)
-    p.circle('x','y',source=flight_source,fill_color='red',hover_color='yellow',size=10,fill_alpha=0.8,line_width=0)
+        self.time_position = time_position
+        self.longitude = longitude
+        self.latitude = latitude
+        self.velocity = velocity
+        self.geo_altitude = geo_altitude
+#Manipulation values can be changed
+def  Manipulate_Data(icao24 = "", time_position = 0, longitude = 0, latitude = 0, velocity = 0, geo_altitude = 0):
+    if(longitude != None):
+      n_longitude = longitude*0.97
+    if(latitude != None):
+      n_latitude =  latitude*0.97
+    if(velocity != None):
+      n_velocity =  velocity*0.97
+    if(geo_altitude != None):
+      n_geo_altitude = geo_altitude*0.97
 
-    #ADD HOVER TOOL AND LABEL
-    my_hover=HoverTool()
-    my_hover.tooltips=[('Call sign','@callsign'),('Origin Country','@origin_country'),('velocity(m/s)','@velocity'),('Altitude(m)','@baro_altitude')]
-    labels = LabelSet(x='x', y='y', text='callsign', level='glyph',
-            x_offset=5, y_offset=5, source=flight_source, render_mode='canvas',background_fill_color='white',text_font_size="8pt")
-    p.add_tools(my_hover)
-    p.add_layout(labels)
+      return Data_for_aircraft(icao24, time_position, n_longitude, n_latitude, n_velocity, n_geo_altitude)
     
-    doc.title='REAL TIME FLIGHT TRACKING'
-    doc.add_root(p)
-    
-# SERVER CODE
-apps = {'/': Application(FunctionHandler(flight_tracking))}
-server = Server(apps, port=8084) #define an unused port
-server.start()
+#User gives input for below variables
+Aircraft_Tuples = {}
+
+year = 2005
+month = 2
+day = 25
+hour = 10
+minute = 30
+second = 15
+seconds_since_epoch = int(datetime(year, month, day, hour, minute, second).timestamp())
+print(seconds_since_epoch)
+min_latitude = 45.8389
+max_latitude = 47.8229
+min_longitude = 5.9962
+max_longitude = 10.5226
+# I cannot specify time  why?
+states = api.get_states(0, None, bbox=(min_latitude, max_latitude, min_longitude, max_longitude))
+
+if(states != None):
+    print(f'TIME: {states.time}')
+    for s in states.states:
+        print(f'ICAO24: {s.icao24} Time_Position: {s.time_position}  Longitude: {s.longitude} Latitude: {s.latitude} Velocity: {s.velocity} Geo_altitude: {s.geo_altitude}')
+        
+        aircraft = Data_for_aircraft(s.icao24, s.time_position, s.longitude, s.latitude, s.velocity, s.geo_altitude)
+        
+        manipulated_aircraft = Manipulate_Data(s.icao24, s.time_position, s.longitude, s.latitude, s.velocity, s.geo_altitude)
+        
+        if(manipulated_aircraft != None):
+            Aircraft_Tuples[s.icao24] = (aircraft, manipulated_aircraft)
+        else:
+            print("Can not manipulate")
+else:
+    print("There is no data")
+
+#printing pairs of original and manipulated data
+for key in Aircraft_Tuples:
+    (a,b) = Aircraft_Tuples[key]
+    print(f'ICAO24: {a.icao24} Time_Position: {a.time_position}  Longitude: {a.longitude} Latitude: {a.latitude} Velocity: {a.velocity} Geo_altitude: {a.geo_altitude}')
+    print(f'ICAO24: {b.icao24} Time_Position: {b.time_position}  Longitude: {b.longitude} Latitude: {b.latitude} Velocity: {b.velocity} Geo_altitude: {b.geo_altitude}')        
+
+
